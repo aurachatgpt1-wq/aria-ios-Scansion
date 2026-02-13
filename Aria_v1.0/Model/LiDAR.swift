@@ -64,7 +64,7 @@ struct ARObjectAnchor: Codable, Identifiable {
     init(id: UUID = UUID(),
          type: ARObjectType,
          position: SIMD3<Float>,
-         rotation: Rotation4 = Rotation4()),
+         rotation: Rotation4 = Rotation4(),
          scale: SIMD3<Float> = [1, 1, 1],
          modelPath: String = "",
          name: String = "Object") {
@@ -95,10 +95,10 @@ struct Rotation4: Codable, Equatable {
     }
     
     init(simdQuat: simd_quatf) {
-        self.x = simdQuat.x
-        self.y = simdQuat.y
-        self.z = simdQuat.z
-        self.w = simdQuat.w
+        self.x = simdQuat.vector.x
+        self.y = simdQuat.vector.y
+        self.z = simdQuat.vector.z
+        self.w = simdQuat.vector.w
     }
     
     var simdQuat: simd_quatf {
