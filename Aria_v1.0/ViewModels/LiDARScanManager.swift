@@ -57,11 +57,6 @@ final class LiDARScanManager: NSObject {
         // Enable plane detection
         configuration?.planeDetection = [.horizontal, .vertical]
         
-        // Frame semantics per depth
-        if ARWorldTrackingConfiguration.supportsFrameSemantics(.rawFeaturePoints) {
-            configuration?.frameSemantics.insert(.rawFeaturePoints)
-        }
-        
         if let config = configuration {
             session.delegate = self
             session.run(config)
@@ -319,16 +314,28 @@ final class LiDARScanManager: NSObject {
 
 // MARK: - ARSessionDelegate
 
-extension LiDARScanManager: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         guard isScanning else { return }
         
         // Collect depth frames
         if let depthData = frame.capturedDepthData {
+            // Get intrinsics from camera calibration data
+            let intrinsics: matrix_float3x3
+            if let calibration = depthData.cameraCalibrationData?.intrinsicMatrix {
+                intrinsics = calibration
+            } else {
+                // Fallback to default intrinsics if not available
+                intrinsics = matrix_float3x3(
+                    SIMD3<Float>(500, 0, 320),
+                    SIMD3<Float>(0, 500, 240),
+                    SIMD3<Float>(0, 0, 1)
+                )
+            }
+            
             let lidarFrame = LiDARFrame(
                 depthMap: depthData.depthDataMap,
                 timestamp: frame.timestamp,
-                intrinsics: depthData.intrinsics,
+                intrinsics: intrinsics,
                 position: frame.camera.transform.translation,
                 orientation: frame.camera.transform.rotation
             )
