@@ -1,0 +1,58 @@
+# Xcode
+.DS_Store
+xcuserdata/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/
+DerivedData/
+build/
+.build/
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Carthage
+Carthage/Build
+
+# fastlane
+fastlane/report.xml
+fastlane/screenshots
+
+# Code coverage
+*.gcno
+*.gcda
+coverage.xml
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LiDAR Scans (local data)
+LiDARScans/
+
+# Configuration & Secrets
+Config.plist
+config.local.plist
+*.plist.local
+.env
+.env.local
+Secrets/
+
+# API Keys and Credentials
+Aria-v1-0-Info.plist
+
