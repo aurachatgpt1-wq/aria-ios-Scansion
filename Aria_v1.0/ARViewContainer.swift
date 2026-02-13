@@ -30,7 +30,7 @@ struct ARViewContainer: UIViewControllerRepresentable {
 
 // MARK: - ARViewController
 
-class ARViewController: UIViewController, ARViewDelegate {
+class ARViewController: UIViewController {
     
     var arView: ARView!
     var scanManager: LiDARScanManager
@@ -38,9 +38,6 @@ class ARViewController: UIViewController, ARViewDelegate {
     var onRoomRecognized: (RoomScan?) -> Void = { _ in }
     
     var meshVisualizer: MeshVisualizer?
-    var tapGestureRecognizer: UITapGestureRecognizer?
-    var panGestureRecognizer: UIPanGestureRecognizer?
-    
     var selectedAnchorId: UUID? = nil
     
     init(scanManager: LiDARScanManager) {
@@ -57,13 +54,16 @@ class ARViewController: UIViewController, ARViewDelegate {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        let arView = ARView(frame: view.bounds)
-        self.arView = arView
+        // Create ARView
+        let arViewFrame = view.bounds
+        arView = ARView(frame: arViewFrame)
         view.addSubview(arView)
         
+        // Setup gestures
         setupGestureRecognizers()
         setupDebugUI()
         
+        // Create mesh visualizer
         meshVisualizer = MeshVisualizer(arView: arView)
     }
     
@@ -72,26 +72,24 @@ class ARViewController: UIViewController, ARViewDelegate {
     private func setupGestureRecognizers() {
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         arView.addGestureRecognizer(tapGesture)
-        self.tapGestureRecognizer = tapGesture
         
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         arView.addGestureRecognizer(panGesture)
-        self.panGestureRecognizer = panGesture
     }
     
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: arView)
         
-        // Raycasting per rilevare click su anchorare
+        // Raycast to find tap location
         if let result = arView.raycast(from: location, allowing: .estimatedPlane, alignment: .any).first {
+            print("🎯 Tap at world position: \(result.worldTransform.translation)")
             
-            // Slot per mostrare UI di posizionamento
-            print("🎯 Posizionamento richiesto a: \(result.worldTransform.translation)")
+            // Try to recognize room
+            let recognized = scanManager.recognizeRoom(from: scanManager.meshVertices)
+            if recognized != nil {
+                onRoomRecognized(recognized)
+            }
         }
-        
-        // Riconosci stanza se non ancora fatto
-        let recognized = scanManager.recognizeRoom(from: scanManager.meshVertices)
-        onRoomRecognized(recognized)
     }
     
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -131,7 +129,7 @@ class ARViewController: UIViewController, ARViewDelegate {
         ])
     }
     
-    // MARK: - Mesh Visualization
+    // MARK: - Public Methods
     
     func updateMeshVisualization() {
         guard !scanManager.meshVertices.isEmpty else { return }
@@ -145,7 +143,6 @@ class ARViewController: UIViewController, ARViewDelegate {
     }
     
     func placeObject(type: ARObjectAnchor.ARObjectType, name: String) {
-        // Add object at center screen
         let screenCenter = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
         
         if let result = arView.raycast(from: screenCenter, allowing: .estimatedPlane, alignment: .any).first {
@@ -155,7 +152,6 @@ class ARViewController: UIViewController, ARViewDelegate {
                 name: name
             )
             
-            // Create visual representation
             meshVisualizer?.placeObject(
                 position: result.worldTransform.translation,
                 name: name,
@@ -188,71 +184,83 @@ class MeshVisualizer {
     func visualizeMesh(_ vertices: [SIMD3<Float>]) {
         guard !vertices.isEmpty, let meshAnchor = meshAnchor else { return }
         
-        // Create point cloud mesh
-        var meshDescriptor = MeshDescriptor()
-        meshDescriptor.positions = MeshDescriptor.Positions(vertices)
+        // Create simple point cloud visualization using boxes
+        // Sample every Nth vertex for performance
+        let sampleRate = max(1, vertices.count / 1000)
         
-        // Create indices
-        let indices = (0..<UInt32(vertices.count)).map { UInt32($0) }
-        meshDescriptor.primitives = [
-            .triangle(indices.map { NSNumber(value: $0) })
-        ]
-        
-        do {
-            let mesh = try Mesh(descriptor: meshDescriptor)
-            var material = Material()
-            material.color = .init(tint: .cyan.withAlphaComponent(0.5))
-            
-            let meshModel = ModelEntity(mesh: mesh, materials: [material])
-            meshAnchor.addChild(meshModel)
-            
-            print("✅ Mesh visualizzato: \(vertices.count) vertici")
-        } catch {
-            print("❌ Errore mesh: \(error)")
+        for (index, vertex) in vertices.enumerated() where index % sampleRate == 0 {
+            do {
+                let mesh = MeshResource.generateBox(size: 0.01)
+                var material = SimpleMaterial()
+                material.color = .init(tint: .cyan)
+                
+                let pointModel = ModelEntity(mesh: mesh, materials: [material])
+                var transform = Transform()
+                transform.translation = vertex
+                pointModel.move(to: transform, relativeTo: meshAnchor, duration: 0, timingFunction: .linear)
+                
+                meshAnchor.addChild(pointModel)
+            } catch {
+                print("❌ Error creating point entity: \(error)")
+            }
         }
+        
+        print("✅ Mesh visualizzato: \(vertices.count) vertici (sample rate: \(sampleRate))")
     }
     
     func visualizePlane(_ plane: DetectedPlane) {
         guard let meshAnchor = meshAnchor else { return }
         
-        let extent = plane.extent
-        let mesh = MeshResource.generatePlane(size: extent)
-        var material = Material()
-        material.color = .init(tint: .yellow.withAlphaComponent(0.3))
-        
-        let planeModel = ModelEntity(mesh: mesh, materials: [material])
-        planeModel.move(
-            to: Transform(translation: plane.center),
-            relativeTo: meshAnchor,
-            duration: 0,
-            timingFunction: .linear
-        )
-        
-        meshAnchor.addChild(planeModel)
-        planeVisualizers[plane.id] = planeModel
+        do {
+            let size = SIMD2<Float>(plane.extent.x, plane.extent.y)
+            let mesh = MeshResource.generatePlane(size: size)
+            var material = SimpleMaterial()
+            material.color = .init(tint: .yellow)
+            
+            let planeModel = ModelEntity(mesh: mesh, materials: [material])
+            
+            var transform = Transform()
+            transform.translation = plane.center
+            planeModel.move(to: transform, relativeTo: meshAnchor, duration: 0, timingFunction: .linear)
+            
+            meshAnchor.addChild(planeModel)
+            planeVisualizers[plane.id] = planeModel
+            
+            print("✅ Piano visualizzato a: \(plane.center)")
+        } catch {
+            print("❌ Error visualizing plane: \(error)")
+        }
     }
     
     func placeObject(position: SIMD3<Float>, name: String, type: ARObjectAnchor.ARObjectType) {
         guard let meshAnchor = meshAnchor else { return }
         
-        let color: UIColor
+        let tintColor: UIColor
         switch type {
-        case .painting: color = .red
-        case .sculpture: color = .green
-        case .furniture: color = .blue
-        case .decoration: color = .magenta
-        case .custom: color = .orange
+        case .painting: tintColor = .red
+        case .sculpture: tintColor = .green
+        case .furniture: tintColor = .blue
+        case .decoration: tintColor = .magenta
+        case .custom: tintColor = .orange
         }
         
-        let mesh = MeshResource.generateBox(size: 0.1)
-        var material = Material()
-        material.color = .init(tint: color)
-        
-        let objectModel = ModelEntity(mesh: mesh, materials: [material])
-        objectModel.position = position
-        
-        meshAnchor.addChild(objectModel)
-        
-        print("📍 Oggetto posizionato: \(name) a \(position)")
+        do {
+            let mesh = MeshResource.generateBox(size: 0.1)
+            var material = SimpleMaterial()
+            material.color = .init(tint: tintColor)
+            
+            let objectModel = ModelEntity(mesh: mesh, materials: [material])
+            
+            var transform = Transform()
+            transform.translation = position
+            objectModel.move(to: transform, relativeTo: meshAnchor, duration: 0, timingFunction: .linear)
+            
+            meshAnchor.addChild(objectModel)
+            objectVisualizers[UUID()] = objectModel
+            
+            print("📍 Oggetto '\(name)' posizionato a: \(position)")
+        } catch {
+            print("❌ Error placing object: \(error)")
+        }
     }
 }
